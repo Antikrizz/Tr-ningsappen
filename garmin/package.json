@@ -1,0 +1,11 @@
+{
+  "name": "traningsapp-garmin-link",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Engångsskript: koppla ett Garmin-konto till träningsappen",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "garmin-connect": "^1.6.7"
+  }
+}
