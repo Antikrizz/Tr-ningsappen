@@ -12,7 +12,8 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
-import { GarminConnect } from "garmin-connect";
+import garminPkg from "garmin-connect";
+const { GarminConnect } = garminPkg;
 import { createClient } from "@supabase/supabase-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

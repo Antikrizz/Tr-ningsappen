@@ -6,6 +6,6 @@
   "description": "Engångsskript: koppla ett Garmin-konto till träningsappen",
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
-    "garmin-connect": "^1.6.7"
+    "garmin-connect": "^1.6.2"
   }
 }

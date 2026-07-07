@@ -9,7 +9,7 @@
 // (endast åtkomlig med service role). Funktionen loggar aldrig in med lösenord.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { GarminConnect } from "npm:garmin-connect@1.6.7";
+import { GarminConnect } from "npm:garmin-connect@1.6.2";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
