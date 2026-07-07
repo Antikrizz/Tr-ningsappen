@@ -1,12 +1,15 @@
-// Edge Function: hämtar styrkepass från Garmin Connect (inofficiellt API via garmin-connect)
+// Edge Function: hämtar styrkepass från Garmin Connect (inofficiellt API)
 // och skriver in dem som workouts + sets. Anropas av klienten vid appöppning och manuellt.
 //
 // Actions (POST-body { action }):
 //   "sync"            – hämta nya aktiviteter från Garmin och importera
 //   "process-pending" – försök importera pass som väntar på övningsmappning
 //
-// Tokens skapas EN gång lokalt med garmin/link.mjs och ligger i tabellen garmin_tokens
-// (endast åtkomlig med service role). Funktionen loggar aldrig in med lösenord.
+// Tokens skapas EN gång lokalt (garmin/link.mjs eller garmin/link_mfa.py) och ligger i
+// tabellen garmin_tokens (endast åtkomlig med service role). Två format stöds:
+//   { oauth1, oauth2 }  – äldre formatet (npm garmin-connect, link.mjs)
+//   { di: {...} }       – nya DI-formatet (python-garminconnect, link_mfa.py)
+// Funktionen loggar aldrig in med lösenord.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 // garmin-connect är ett CommonJS-paket — named import funkar inte i Deno, ta default-exporten
@@ -78,6 +81,7 @@ const DEFAULT_MAP: Record<string, string> = {
 };
 
 type PendingSet = { key: string; reps: number; weightKg: number };
+type DiTokens = { di_token: string; di_refresh_token: string; di_client_id: string };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -192,11 +196,9 @@ Deno.serve(async (req) => {
     }
 
     // ===== action: "sync" =====
-    const gc = new GarminConnect({ username: "", password: "" });
-    gc.loadToken(tokenRow.token_data.oauth1, tokenRow.token_data.oauth2);
+    const garminFetch = await makeGarminFetch(tokenRow.token_data, service, userId);
 
-    const activities = await gcGet(
-      gc,
+    const activities = await garminFetch(
       "https://connectapi.garmin.com/activitylist-service/activities/search/activities?start=0&limit=30"
     );
     const strength = (activities ?? []).filter(
@@ -222,8 +224,7 @@ Deno.serve(async (req) => {
       const activityId = Number(act.activityId);
       if (known.has(activityId)) continue;
 
-      const detail = await gcGet(
-        gc,
+      const detail = await garminFetch(
         `https://connectapi.garmin.com/activity-service/activity/${activityId}/exerciseSets`
       );
       const rawSets = (detail?.exerciseSets ?? []).filter(
@@ -253,24 +254,127 @@ Deno.serve(async (req) => {
       }
     }
 
-    // spara ev. förnyade tokens så nästa anrop slipper refresh
-    try {
-      const client: any = (gc as any).client;
-      if (client?.oauth1Token && client?.oauth2Token) {
-        await service.from("garmin_tokens").upsert({
-          user_id: userId,
-          token_data: { oauth1: client.oauth1Token, oauth2: client.oauth2Token },
-          updated_at: new Date().toISOString()
-        });
-      }
-    } catch (_) { /* tokensparning är best effort */ }
-
     return json({ linked: true, imported, pendingUnmapped: [...pendingUnmapped] });
   } catch (err) {
     console.error("garmin-sync error:", err);
     return json({ error: String(err?.message ?? err) }, 500);
   }
 });
+
+// ===================== Garmin-autentisering =====================
+// Returnerar en GET-funktion mot Garmins API, oavsett vilket token-format
+// användaren har. Förnyade tokens sparas tillbaka i databasen.
+
+// deno-lint-ignore no-explicit-any
+async function makeGarminFetch(tokenData: any, service: any, userId: string) {
+  // ---- Nytt DI-format (link_mfa.py / python-garminconnect) ----
+  if (tokenData.di) {
+    let di = tokenData.di as DiTokens;
+
+    const save = async () => {
+      await service
+        .from("garmin_tokens")
+        .update({ token_data: { di }, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
+    };
+
+    // förnya i förväg om JWT:n går ut inom 15 min
+    if (jwtExpiresSoon(di.di_token)) {
+      di = await refreshDiToken(di);
+      await save();
+    }
+
+    return async (url: string) => {
+      let res = await fetch(url, { headers: diHeaders(di.di_token) });
+      if (res.status === 401 || res.status === 403) {
+        // token dög inte ändå -> förnya en gång och försök igen
+        di = await refreshDiToken(di);
+        await save();
+        res = await fetch(url, { headers: diHeaders(di.di_token) });
+      }
+      if (!res.ok) throw new Error(`Garmin svarade ${res.status} för ${url}`);
+      return await res.json();
+    };
+  }
+
+  // ---- Äldre oauth1/oauth2-format (link.mjs / npm garmin-connect) ----
+  const gc = new GarminConnect({ username: "", password: "" });
+  gc.loadToken(tokenData.oauth1, tokenData.oauth2);
+
+  // spara ev. förnyade tokens efter första anropet (best effort)
+  let savedBack = false;
+  return async (url: string) => {
+    const result = await gcGet(gc, url);
+    if (!savedBack) {
+      savedBack = true;
+      try {
+        const client: any = (gc as any).client;
+        if (client?.oauth1Token && client?.oauth2Token) {
+          await service
+            .from("garmin_tokens")
+            .update({
+              token_data: { oauth1: client.oauth1Token, oauth2: client.oauth2Token },
+              updated_at: new Date().toISOString()
+            })
+            .eq("user_id", userId);
+        }
+      } catch (_) { /* tokensparning är best effort */ }
+    }
+    return result;
+  };
+}
+
+// Samma headers som officiella Garmin Connect-appen (python-garminconnect:s motor)
+function diHeaders(diToken: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${diToken}`,
+    Accept: "application/json",
+    "User-Agent": "GCM-Android-5.23",
+    "X-Garmin-User-Agent":
+      "com.garmin.android.apps.connectmobile/5.23; ; Google/sdk_gphone64_arm64/google; Android/33; Dalvik/2.1.0",
+    "X-Garmin-Paired-App-Version": "10861",
+    "X-Garmin-Client-Platform": "Android",
+    "X-App-Ver": "10861",
+    "X-Lang": "en"
+  };
+}
+
+function jwtExpiresSoon(token: string): boolean {
+  try {
+    const payloadB64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(payloadB64));
+    return payload.exp && Date.now() / 1000 > payload.exp - 900;
+  } catch {
+    return true; // kan vi inte läsa den, förnya för säkerhets skull
+  }
+}
+
+async function refreshDiToken(di: DiTokens): Promise<DiTokens> {
+  const res = await fetch("https://diauth.garmin.com/di-oauth2-service/oauth/token", {
+    method: "POST",
+    headers: {
+      Authorization: "Basic " + btoa(`${di.di_client_id}:`),
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Cache-Control": "no-cache",
+      "User-Agent": "GCM-Android-5.23"
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: di.di_client_id,
+      refresh_token: di.di_refresh_token
+    })
+  });
+  if (!res.ok) {
+    throw new Error(`Garmin-tokenförnyelse misslyckades (${res.status}) — kör link_mfa.py igen`);
+  }
+  const data = await res.json();
+  return {
+    di_token: data.access_token,
+    di_refresh_token: data.refresh_token ?? di.di_refresh_token,
+    di_client_id: di.di_client_id
+  };
+}
 
 // garmin-connect-biblioteket exponerar en autentisierad GET (inkl. token-refresh);
 // exakt metodnamn har varierat mellan versioner, så vi provar i tur och ordning.

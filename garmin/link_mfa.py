@@ -2,25 +2,26 @@
 # Skriptet frågar efter engångskoden som Garmin mejlar vid inloggning.
 #
 #   cd garmin
-#   py -m pip install garth requests
+#   py -m pip install garminconnect requests
 #   py link_mfa.py
 #
-# Precis som link.mjs: lösenordet skickas bara till Garmin, det som sparas i
-# Supabase är tokens (giltiga ~1 år). Kör om skriptet när de gått ut.
+# Använder python-garminconnect:s nya inloggningsmotor (imiterar officiella
+# Garmin-appen) eftersom Garmin sedan mars 2026 blockerar äldre inloggningssätt.
+# Lösenordet skickas bara till Garmin; det som sparas i Supabase är DI-tokens
+# (förnyar sig själva via refresh-token). Kör om skriptet om synken slutar funka.
 
-import dataclasses
 import getpass
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    import garth
     import requests
+    from garminconnect import Garmin
 except ImportError:
-    print("Saknar bibliotek. Kör först:  py -m pip install garth requests")
+    print("Saknar bibliotek. Kör först:  py -m pip install garminconnect requests")
     sys.exit(1)
 
 
@@ -48,18 +49,27 @@ app_email = input("E-post i träningsappen (kontot som ska kopplas): ").strip().
 garmin_email = input("Garmin-e-post: ").strip()
 garmin_password = getpass.getpass("Garmin-lösenord (syns inte när du skriver): ")
 
+
+def prompt_mfa() -> str:
+    return input("\nEngångskod från Garmin (kolla mejlen): ").strip()
+
+
 print("\nLoggar in mot Garmin Connect… (koden som mejlas frågas efter strax)")
 try:
-    garth.login(garmin_email, garmin_password)  # frågar själv efter MFA-koden vid behov
+    garmin = Garmin(email=garmin_email, password=garmin_password, prompt_mfa=prompt_mfa)
+    garmin.login()
 except Exception as err:
     print(f"\n❌ Garmin-inloggningen misslyckades: {err}")
+    print(
+        "\nTips: Får du 429/Too Many Requests har Garmin tillfälligt spärrat försöken —\n"
+        "vänta en timme och kör EN gång till."
+    )
     sys.exit(1)
 
-oauth1 = dataclasses.asdict(garth.client.oauth1_token)
-oauth2 = dataclasses.asdict(garth.client.oauth2_token)
-# datetime-fält (t.ex. mfa_expiration_timestamp) måste bli strängar i JSON
-oauth1 = json.loads(json.dumps(oauth1, default=str))
-oauth2 = json.loads(json.dumps(oauth2, default=str))
+di = json.loads(garmin.client.dumps())  # {di_token, di_refresh_token, di_client_id}
+if not di.get("di_token") or not di.get("di_refresh_token"):
+    print("❌ Inloggningen lyckades men inga tokens hittades — bibliotekversionen kan ha ändrats.")
+    sys.exit(1)
 print("✅ Garmin-inloggning OK")
 
 headers = {
@@ -85,8 +95,8 @@ resp = requests.post(
     headers={**headers, "Prefer": "resolution=merge-duplicates"},
     json={
         "user_id": user["id"],
-        "token_data": {"oauth1": oauth1, "oauth2": oauth2},
-        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "token_data": {"di": di},
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     },
 )
 if resp.status_code not in (200, 201, 204):

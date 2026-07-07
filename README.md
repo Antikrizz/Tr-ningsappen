@@ -63,9 +63,13 @@ engångskoden som Garmin mejlar:
 
 ```bash
 cd garmin
-py -m pip install garth requests
+py -m pip install garminconnect requests
 py link_mfa.py
 ```
+
+Obs: Garmin blockerar sedan mars 2026 äldre inloggningsmetoder (429-fel). `link_mfa.py` använder
+python-garminconnects nya motor som imiterar officiella appen. Får du ändå 429: vänta en timme
+och försök EN gång till.
 
 ## Bra att veta
 
