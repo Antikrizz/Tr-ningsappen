@@ -9,7 +9,10 @@
 // (endast åtkomlig med service role). Funktionen loggar aldrig in med lösenord.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { GarminConnect } from "npm:garmin-connect@1.6.2";
+// garmin-connect är ett CommonJS-paket — named import funkar inte i Deno, ta default-exporten
+import garminConnectPkg from "npm:garmin-connect@1.6.2";
+// deno-lint-ignore no-explicit-any
+const GarminConnect = (garminConnectPkg as any).GarminConnect ?? (garminConnectPkg as any).default?.GarminConnect;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
