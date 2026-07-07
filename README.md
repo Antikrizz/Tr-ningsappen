@@ -57,10 +57,15 @@ supabase functions deploy garmin-sync --project-ref <ditt-projekt-ref>
 Därefter hämtas nya styrkepass automatiskt varje gång appen öppnas, plus via knappen
 **Mer → Hämta nya pass**. Okända övningsnamn från Garmin mappas en gång under **Mer** och kommer ihåg.
 
-**Om Garmin-kontot har tvåfaktor (MFA):** biblioteket klarar inte MFA-prompten. Stäng av MFA
-tillfälligt, kör `link.mjs`, slå på MFA igen (tokens fortsätter gälla). Alternativ: logga in med
-Python-biblioteket [garth](https://github.com/matin/garth) (`garth.login()` hanterar MFA) och lägg
-tokens i tabellen `garmin_tokens` i formatet `{"oauth1": ..., "oauth2": ...}`.
+**Om Garmin-kontot har tvåfaktor (MFA):** `link.mjs` klarar inte MFA-prompten (och på nyare
+Garmin-konton går MFA inte att stänga av). Använd då Python-varianten som frågar efter
+engångskoden som Garmin mejlar:
+
+```bash
+cd garmin
+py -m pip install garth requests
+py link_mfa.py
+```
 
 ## Bra att veta
 
