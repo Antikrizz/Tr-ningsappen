@@ -21,6 +21,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [syncResult, setSyncResult] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
+  const [garminExpired, setGarminExpired] = useState(false);
 
   const showToast = useCallback((msg) => {
     setToast(msg);
@@ -46,6 +47,7 @@ export default function App() {
         if (error || !data) return null;
         setSyncResult(data);
         setPendingCount(data.pendingUnmapped?.length ?? 0);
+        setGarminExpired(Boolean(data.authExpired));
         if (data.imported > 0) {
           showToast(`${data.imported} nya pass hämtade från Garmin`);
           bumpRefresh();
@@ -89,6 +91,7 @@ export default function App() {
         {tab === "logga" && (
           <LogWorkout
             key={editWorkout ? `edit-${editWorkout.id}` : `new-${refreshKey}`}
+            session={session}
             editWorkout={editWorkout}
             onDone={() => {
               setEditWorkout(null);
@@ -99,13 +102,14 @@ export default function App() {
           />
         )}
         {tab === "historik" && (
-          <History key={refreshKey} onEdit={startEdit} onChanged={bumpRefresh} showToast={showToast} />
+          <History key={refreshKey} session={session} onEdit={startEdit} onChanged={bumpRefresh} showToast={showToast} />
         )}
-        {tab === "progress" && <Progress key={refreshKey} />}
+        {tab === "progress" && <Progress key={refreshKey} session={session} />}
         {tab === "mer" && (
           <More
             session={session}
             syncResult={syncResult}
+            garminExpired={garminExpired}
             runSync={runSync}
             showToast={showToast}
             onImported={bumpRefresh}
@@ -118,7 +122,7 @@ export default function App() {
           <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
             <span className="tab-icon">{t.icon}</span>
             {t.label}
-            {t.id === "mer" && pendingCount > 0 && <span className="badge-dot" />}
+            {t.id === "mer" && (pendingCount > 0 || garminExpired) && <span className="badge-dot" />}
           </button>
         ))}
       </nav>

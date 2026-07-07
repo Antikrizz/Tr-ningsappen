@@ -2,23 +2,34 @@ import { useEffect, useState } from "react";
 import { supabase } from "../supabase.js";
 import { workoutsToCsv, downloadFile, todayIso } from "../lib/stats.js";
 
-export default function More({ session, runSync, showToast, onImported }) {
+export default function More({ session, runSync, garminExpired, showToast, onImported }) {
+  const uid = session.user.id;
   const [profile, setProfile] = useState(null);
   const [exercises, setExercises] = useState([]);
   const [pending, setPending] = useState([]);
+  const [mappings, setMappings] = useState([]);
+  const [goals, setGoals] = useState({});
+  const [goalOpen, setGoalOpen] = useState(null);
+  const [goalDraft, setGoalDraft] = useState({ target_reps: 8, increment: 2.5 });
   const [mapDraft, setMapDraft] = useState({});
   const [newExercise, setNewExercise] = useState("");
+  const [showMappings, setShowMappings] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function loadAll() {
-    const [{ data: prof }, { data: ex }, { data: pend }] = await Promise.all([
-      supabase.from("profiles").select("name,garmin_linked").eq("id", session.user.id).maybeSingle(),
-      supabase.from("exercises").select("id,name,owner_id").order("name"),
-      supabase.from("garmin_pending").select("activity_id,date,unmapped")
-    ]);
+    const [{ data: prof }, { data: ex }, { data: pend }, { data: maps }, { data: goalRows }] =
+      await Promise.all([
+        supabase.from("profiles").select("name,garmin_linked").eq("id", uid).maybeSingle(),
+        supabase.from("exercises").select("id,name,owner_id").order("name"),
+        supabase.from("garmin_pending").select("activity_id,date,unmapped"),
+        supabase.from("garmin_mappings").select("garmin_key,exercise_id,exercises(name)").order("garmin_key"),
+        supabase.from("exercise_goals").select("exercise_id,target_reps,increment")
+      ]);
     setProfile(prof ?? { name: "", garmin_linked: false });
     setExercises(ex ?? []);
     setPending(pend ?? []);
+    setMappings(maps ?? []);
+    setGoals(Object.fromEntries((goalRows ?? []).map((g) => [g.exercise_id, g])));
   }
 
   useEffect(() => { loadAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -95,10 +106,40 @@ export default function More({ session, runSync, showToast, onImported }) {
     setExercises((l) => l.filter((e) => e.id !== ex.id));
   }
 
+  async function removeMapping(m) {
+    if (!window.confirm(`Ta bort mappningen "${prettyKey(m.garmin_key)} → ${m.exercises?.name}"? Nästa import frågar igen.`)) return;
+    const { error } = await supabase
+      .from("garmin_mappings")
+      .delete()
+      .eq("user_id", uid)
+      .eq("garmin_key", m.garmin_key);
+    if (error) { showToast("Kunde inte ta bort mappningen"); return; }
+    setMappings((l) => l.filter((x) => x.garmin_key !== m.garmin_key));
+  }
+
+  function openGoal(ex) {
+    const g = goals[ex.id];
+    setGoalDraft({ target_reps: g?.target_reps ?? 8, increment: g?.increment ?? 2.5 });
+    setGoalOpen(goalOpen === ex.id ? null : ex.id);
+  }
+
+  async function saveGoal(ex) {
+    const target_reps = Math.max(1, Math.min(50, Number(goalDraft.target_reps) || 8));
+    const increment = Math.max(0.25, Number(String(goalDraft.increment).replace(",", ".")) || 2.5);
+    const { error } = await supabase
+      .from("exercise_goals")
+      .upsert({ user_id: uid, exercise_id: ex.id, target_reps, increment });
+    if (error) { showToast("Kunde inte spara målet"); return; }
+    setGoals((g) => ({ ...g, [ex.id]: { exercise_id: ex.id, target_reps, increment } }));
+    setGoalOpen(null);
+    showToast(`Mål för ${ex.name}: ${target_reps} reps, +${increment} kg`);
+  }
+
   async function exportData(format) {
     const { data } = await supabase
       .from("workouts")
       .select("date,note,source,sets(set_number,reps,weight,exercises(name))")
+      .eq("user_id", uid)
       .order("date");
     if (!data?.length) { showToast("Ingen data att exportera"); return; }
     if (format === "csv") {
@@ -113,6 +154,13 @@ export default function More({ session, runSync, showToast, onImported }) {
       <h1>Mer</h1>
 
       <h2>Garmin</h2>
+      {garminExpired && (
+        <div className="error-box">
+          ⚠️ <strong>Garmin-kopplingen har gått ut.</strong> Synken är pausad tills du kör
+          link-skriptet på datorn igen (<code>py link_mfa.py</code> eller <code>node link.mjs</code>,
+          se README). Din data är kvar och inget annat påverkas.
+        </div>
+      )}
       <div className="card">
         {profile === null ? (
           <div className="muted">Laddar…</div>
@@ -127,6 +175,22 @@ export default function More({ session, runSync, showToast, onImported }) {
             <div className="muted small" style={{ marginTop: 6 }}>
               Nya styrkepass hämtas också automatiskt varje gång appen öppnas.
             </div>
+            {mappings.length > 0 && (
+              <>
+                <div className="divider" />
+                <button className="link" onClick={() => setShowMappings(!showMappings)}>
+                  {showMappings ? "Dölj" : "Visa"} övningsmappningar ({mappings.length})
+                </button>
+                {showMappings && mappings.map((m) => (
+                  <div className="row-between" key={m.garmin_key} style={{ padding: "4px 0" }}>
+                    <span className="small">
+                      <span className="muted">{prettyKey(m.garmin_key)}</span> → {m.exercises?.name ?? "?"}
+                    </span>
+                    <button className="remove-x" onClick={() => removeMapping(m)} title="Ta bort mappning">✕</button>
+                  </div>
+                ))}
+              </>
+            )}
           </>
         ) : (
           <div className="muted small">
@@ -177,12 +241,48 @@ export default function More({ session, runSync, showToast, onImported }) {
         </div>
         <div className="divider" />
         {exercises.map((ex) => (
-          <div className="row-between" key={ex.id} style={{ padding: "5px 0" }}>
-            <span className="small">
-              {ex.name} {ex.owner_id && <span className="badge">egen</span>}
-            </span>
-            {ex.owner_id === session.user.id && (
-              <button className="remove-x" onClick={() => removeExercise(ex)}>✕</button>
+          <div key={ex.id} style={{ padding: "5px 0" }}>
+            <div className="row-between">
+              <span className="small">
+                {ex.name} {ex.owner_id && <span className="badge">egen</span>}
+                {goals[ex.id] && (
+                  <span className="badge goal">{goals[ex.id].target_reps} reps · +{Number(goals[ex.id].increment)} kg</span>
+                )}
+              </span>
+              <span className="row" style={{ gap: 2 }}>
+                <button className="remove-x" title="Repmål för vikt-förslag" onClick={() => openGoal(ex)}>🎯</button>
+                {ex.owner_id === uid && (
+                  <button className="remove-x" onClick={() => removeExercise(ex)}>✕</button>
+                )}
+              </span>
+            </div>
+            {goalOpen === ex.id && (
+              <div className="goal-edit">
+                <div className="muted small" style={{ marginBottom: 6 }}>
+                  När du klarat repmålet på toppvikten två pass i rad föreslår appen +ökningen.
+                </div>
+                <div className="row">
+                  <div style={{ flex: 1 }}>
+                    <label>Repmål</label>
+                    <input
+                      type="number" inputMode="numeric" min="1" max="50"
+                      value={goalDraft.target_reps}
+                      onChange={(e) => setGoalDraft((d) => ({ ...d, target_reps: e.target.value }))}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label>Ökning (kg)</label>
+                    <input
+                      type="number" inputMode="decimal" step="0.25" min="0.25"
+                      value={goalDraft.increment}
+                      onChange={(e) => setGoalDraft((d) => ({ ...d, increment: e.target.value }))}
+                    />
+                  </div>
+                  <button className="btn btn-small" style={{ alignSelf: "flex-end" }} onClick={() => saveGoal(ex)}>
+                    Spara
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         ))}

@@ -196,15 +196,6 @@ Deno.serve(async (req) => {
     }
 
     // ===== action: "sync" =====
-    const garminFetch = await makeGarminFetch(tokenRow.token_data, service, userId);
-
-    const activities = await garminFetch(
-      "https://connectapi.garmin.com/activitylist-service/activities/search/activities?start=0&limit=30"
-    );
-    const strength = (activities ?? []).filter(
-      (a: any) => a?.activityType?.typeKey === "strength_training"
-    );
-
     // vilka är redan importerade eller väntande?
     const [{ data: doneRows }, { data: pendRows }] = await Promise.all([
       service
@@ -220,46 +211,73 @@ Deno.serve(async (req) => {
     ]);
     const pendingUnmapped = new Set<string>((pendRows ?? []).flatMap((r) => r.unmapped ?? []));
 
-    for (const act of strength) {
-      const activityId = Number(act.activityId);
-      if (known.has(activityId)) continue;
+    // Garmin-delen för sig: misslyckas autentiseringen (utgångna tokens) vill vi
+    // svara ordnat med authExpired=true så appen kan visa en tydlig varning.
+    let authExpired = false;
+    try {
+      const garminFetch = await makeGarminFetch(tokenRow.token_data, service, userId);
 
-      const detail = await garminFetch(
-        `https://connectapi.garmin.com/activity-service/activity/${activityId}/exerciseSets`
+      const activities = await garminFetch(
+        "https://connectapi.garmin.com/activitylist-service/activities/search/activities?start=0&limit=30"
       );
-      const rawSets = (detail?.exerciseSets ?? []).filter(
-        (s: any) => s.setType === "ACTIVE" && (s.repetitionCount ?? 0) > 0
+      const strength = (activities ?? []).filter(
+        (a: any) => a?.activityType?.typeKey === "strength_training"
       );
-      if (rawSets.length === 0) continue;
 
-      const sets: PendingSet[] = rawSets.map((s: any) => ({
-        key: s.exercises?.[0]?.name ?? s.exercises?.[0]?.category ?? "UNKNOWN",
-        reps: s.repetitionCount,
-        // Garmin anger vikt i gram
-        weightKg: s.weight ? Math.round((s.weight / 1000) * 100) / 100 : 0
-      }));
-      const date = String(act.startTimeLocal ?? act.startTimeGMT ?? "").slice(0, 10);
-      if (!date) continue;
+      for (const act of strength) {
+        const activityId = Number(act.activityId);
+        if (known.has(activityId)) continue;
 
-      const unmapped = await importIfResolved(activityId, date, sets, act.activityName ?? null);
-      if (unmapped.length > 0) {
-        await service.from("garmin_pending").upsert({
-          activity_id: activityId,
-          user_id: userId,
-          date,
-          payload: { sets, name: act.activityName ?? null },
-          unmapped
-        });
-        unmapped.forEach((k) => pendingUnmapped.add(k));
+        const detail = await garminFetch(
+          `https://connectapi.garmin.com/activity-service/activity/${activityId}/exerciseSets`
+        );
+        const rawSets = (detail?.exerciseSets ?? []).filter(
+          (s: any) => s.setType === "ACTIVE" && (s.repetitionCount ?? 0) > 0
+        );
+        if (rawSets.length === 0) continue;
+
+        const sets: PendingSet[] = rawSets.map((s: any) => ({
+          key: s.exercises?.[0]?.name ?? s.exercises?.[0]?.category ?? "UNKNOWN",
+          reps: s.repetitionCount,
+          // Garmin anger vikt i gram
+          weightKg: s.weight ? Math.round((s.weight / 1000) * 100) / 100 : 0
+        }));
+        const date = String(act.startTimeLocal ?? act.startTimeGMT ?? "").slice(0, 10);
+        if (!date) continue;
+
+        const unmapped = await importIfResolved(activityId, date, sets, act.activityName ?? null);
+        if (unmapped.length > 0) {
+          await service.from("garmin_pending").upsert({
+            activity_id: activityId,
+            user_id: userId,
+            date,
+            payload: { sets, name: act.activityName ?? null },
+            unmapped
+          });
+          unmapped.forEach((k) => pendingUnmapped.add(k));
+        }
+      }
+    } catch (err) {
+      if (isAuthError(err)) {
+        authExpired = true;
+      } else {
+        throw err;
       }
     }
 
-    return json({ linked: true, imported, pendingUnmapped: [...pendingUnmapped] });
+    return json({ linked: true, imported, authExpired, pendingUnmapped: [...pendingUnmapped] });
   } catch (err) {
     console.error("garmin-sync error:", err);
     return json({ error: String(err?.message ?? err) }, 500);
   }
 });
+
+// Utgångna/ogiltiga tokens yttrar sig som 401/403 från Garmin eller
+// misslyckad tokenförnyelse — allt annat är riktiga fel.
+function isAuthError(err: unknown): boolean {
+  const msg = String((err as Error)?.message ?? err);
+  return /tokenförnyelse misslyckades|svarade 40[13]|Hittar ingen Garmin-token/.test(msg);
+}
 
 // ===================== Garmin-autentisering =====================
 // Returnerar en GET-funktion mot Garmins API, oavsett vilket token-format

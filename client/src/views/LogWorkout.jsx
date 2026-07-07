@@ -4,12 +4,14 @@ import { todayIso, formatDate } from "../lib/stats.js";
 
 const emptySet = { reps: "", weight: "" };
 
-export default function LogWorkout({ editWorkout, onDone, onCancelEdit }) {
+export default function LogWorkout({ session, editWorkout, onDone, onCancelEdit }) {
+  const uid = session.user.id;
   const [date, setDate] = useState(editWorkout?.date ?? todayIso());
   const [note, setNote] = useState(editWorkout?.note ?? "");
   const [entries, setEntries] = useState(() => (editWorkout ? entriesFromWorkout(editWorkout) : []));
   const [exercises, setExercises] = useState([]);
   const [hints, setHints] = useState({});
+  const [goals, setGoals] = useState({});
   const [pickerValue, setPickerValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -20,20 +22,33 @@ export default function LogWorkout({ editWorkout, onDone, onCancelEdit }) {
       .select("id,name")
       .order("name")
       .then(({ data }) => setExercises(data ?? []));
+    supabase
+      .from("exercise_goals")
+      .select("exercise_id,target_reps,increment")
+      .then(({ data }) => {
+        const map = {};
+        for (const g of data ?? []) map[g.exercise_id] = g;
+        setGoals(map);
+      });
   }, []);
 
   async function fetchHint(exerciseId) {
+    // två senaste passen med övningen: senaste för "förra gången"-hinten,
+    // båda för att avgöra om det är dags att föreslå viktökning
     const { data } = await supabase
       .from("workouts")
       .select("id,date,sets!inner(set_number,reps,weight,exercise_id)")
       .eq("sets.exercise_id", exerciseId)
+      .eq("user_id", uid)
       .neq("id", editWorkout?.id ?? -1)
       .order("date", { ascending: false })
-      .limit(1);
+      .limit(2);
     if (data?.length) {
       const w = data[0];
       const sets = [...w.sets].sort((a, b) => a.set_number - b.set_number);
-      setHints((h) => ({ ...h, [exerciseId]: { date: w.date, sets } }));
+      const goal = goals[exerciseId] ?? { target_reps: 8, increment: 2.5 };
+      const suggest = suggestNextWeight(data, goal);
+      setHints((h) => ({ ...h, [exerciseId]: { date: w.date, sets, suggest, goal } }));
     }
   }
 
@@ -101,6 +116,7 @@ export default function LogWorkout({ editWorkout, onDone, onCancelEdit }) {
     const { data } = await supabase
       .from("workouts")
       .select("id,date,sets(set_number,reps,weight,exercise_id,exercises(name))")
+      .eq("user_id", uid)
       .order("date", { ascending: false })
       .limit(1);
     if (!data?.length) { setError("Ingen tidigare pass att kopiera."); return; }
@@ -133,6 +149,7 @@ export default function LogWorkout({ editWorkout, onDone, onCancelEdit }) {
         const { data: sameDay } = await supabase
           .from("workouts")
           .select("id")
+          .eq("user_id", uid)
           .eq("date", date)
           .eq("source", "garmin");
         if (sameDay?.length) {
@@ -208,6 +225,12 @@ export default function LogWorkout({ editWorkout, onDone, onCancelEdit }) {
             <div className="hint">
               Förra gången ({formatDate(hints[entry.exerciseId].date)}):{" "}
               {hints[entry.exerciseId].sets.map((s) => `${trim(s.weight)}kg×${s.reps}`).join(", ")}
+              {hints[entry.exerciseId].suggest != null && (
+                <div className="suggest">
+                  💡 Dags att öka! Prova <strong>{trim(hints[entry.exerciseId].suggest)} kg</strong>
+                  {" "}(mål {hints[entry.exerciseId].goal.target_reps} reps klarat två pass i rad)
+                </div>
+              )}
             </div>
           )}
 
@@ -277,6 +300,28 @@ export default function LogWorkout({ editWorkout, onDone, onCancelEdit }) {
       )}
     </div>
   );
+}
+
+// Föreslå ny vikt när repmålet klarats två pass i rad på samma toppvikt.
+// sessions: [senaste, näst senaste] med sets-listor.
+function suggestNextWeight(sessions, goal) {
+  if (sessions.length < 2) return null;
+
+  const topInfo = (w) => {
+    const active = w.sets.filter((s) => s.reps > 0 && Number(s.weight) > 0);
+    if (active.length === 0) return null;
+    const top = Math.max(...active.map((s) => Number(s.weight)));
+    const topSets = active.filter((s) => Number(s.weight) === top);
+    return { top, hit: topSets.every((s) => s.reps >= goal.target_reps) };
+  };
+
+  const a = topInfo(sessions[0]);
+  const b = topInfo(sessions[1]);
+  if (!a || !b) return null;
+  if (a.top === b.top && a.hit && b.hit) {
+    return Math.round((a.top + Number(goal.increment)) * 100) / 100;
+  }
+  return null;
 }
 
 function entriesFromWorkout(workout) {

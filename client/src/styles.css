@@ -102,6 +102,31 @@ h2 { font-size: 1.05rem; margin: 20px 0 10px; }
 }
 .badge.garmin { color: #6ee7ff; border-color: rgba(110, 231, 255, 0.35); }
 .badge.pr { color: var(--green); border-color: rgba(62, 207, 142, 0.4); }
+.badge.partner { color: #f2a6ff; border-color: rgba(242, 166, 255, 0.35); }
+.badge.goal { color: var(--green); border-color: rgba(62, 207, 142, 0.3); margin-left: 4px; }
+
+/* ===== Segmenterad väljare (Mina/Alla) ===== */
+.seg {
+  display: inline-flex;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+}
+.seg button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.82rem;
+  padding: 5px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.seg button.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
 
 /* ===== Formulär ===== */
 input, select, textarea {
@@ -175,6 +200,21 @@ button.link {
   font-size: 0.8rem;
   color: var(--muted);
   margin-bottom: 10px;
+}
+.hint .suggest {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(79, 142, 247, 0.25);
+  color: var(--green);
+}
+.hint .suggest strong { color: var(--green); }
+
+.goal-edit {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  margin-top: 6px;
 }
 
 .toast {

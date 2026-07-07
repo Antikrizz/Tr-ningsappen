@@ -6,7 +6,8 @@ import {
 import { supabase } from "../supabase.js";
 import { buildProgress, formatDate } from "../lib/stats.js";
 
-export default function Progress() {
+export default function Progress({ session }) {
+  const uid = session.user.id;
   const [exercises, setExercises] = useState([]);
   const [selected, setSelected] = useState(() => localStorage.getItem("progress-exercise") ?? "");
   const [data, setData] = useState(null);
@@ -33,6 +34,7 @@ export default function Progress() {
       .from("workouts")
       .select("date, sets!inner(reps,weight,exercise_id)")
       .eq("sets.exercise_id", Number(selected))
+      .eq("user_id", uid)
       .order("date")
       .then(({ data: rows }) => setData(buildProgress(rows ?? [])));
   }, [selected]);

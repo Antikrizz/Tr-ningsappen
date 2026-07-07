@@ -2,21 +2,34 @@ import { useEffect, useState } from "react";
 import { supabase } from "../supabase.js";
 import { formatDateLong } from "../lib/stats.js";
 
-export default function History({ onEdit, onChanged, showToast }) {
+export default function History({ session, onEdit, onChanged, showToast }) {
+  const uid = session.user.id;
   const [workouts, setWorkouts] = useState(null);
+  const [names, setNames] = useState({});
   const [expanded, setExpanded] = useState(null);
+  const [view, setView] = useState(() => localStorage.getItem("history-view") ?? "mine");
 
-  async function load() {
-    const { data } = await supabase
+  async function load(currentView) {
+    let query = supabase
       .from("workouts")
-      .select("id,date,note,source,garmin_activity_id,sets(id,set_number,reps,weight,exercise_id,exercises(name))")
+      .select("id,user_id,date,note,source,garmin_activity_id,sets(id,set_number,reps,weight,exercise_id,exercises(name))")
       .order("date", { ascending: false })
       .order("id", { ascending: false })
       .limit(200);
+    if (currentView === "mine") query = query.eq("user_id", uid);
+    const [{ data }, { data: profiles }] = await Promise.all([
+      query,
+      supabase.from("profiles").select("id,name")
+    ]);
     setWorkouts(data ?? []);
+    setNames(Object.fromEntries((profiles ?? []).map((p) => [p.id, p.name?.trim() || "Okänd"])));
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    localStorage.setItem("history-view", view);
+    setWorkouts(null);
+    load(view);
+  }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function remove(w) {
     if (!window.confirm(`Ta bort passet ${formatDateLong(w.date)}? Detta går inte att ångra.`)) return;
@@ -27,26 +40,39 @@ export default function History({ onEdit, onChanged, showToast }) {
     onChanged();
   }
 
-  if (workouts === null) return <div className="muted">Laddar…</div>;
-
   return (
     <div>
-      <h1>Historik</h1>
-      {workouts.length === 0 && (
+      <div className="row-between">
+        <h1>Historik</h1>
+        <div className="seg">
+          <button className={view === "mine" ? "active" : ""} onClick={() => setView("mine")}>Mina</button>
+          <button className={view === "both" ? "active" : ""} onClick={() => setView("both")}>Alla</button>
+        </div>
+      </div>
+
+      {workouts === null && <div className="muted">Laddar…</div>}
+
+      {workouts?.length === 0 && (
         <div className="card muted">
           Inga pass ännu. Logga ditt första under fliken Logga — eller koppla Garmin under Mer.
         </div>
       )}
 
-      {workouts.map((w) => {
+      {workouts?.map((w) => {
+        const mine = w.user_id === uid;
         const groups = groupSets(w.sets);
         const open = expanded === w.id;
         return (
           <div className="card card-tap" key={w.id} onClick={() => setExpanded(open ? null : w.id)}>
             <div className="row-between">
               <strong>{formatDateLong(w.date)}</strong>
-              <span className={`badge ${w.source === "garmin" ? "garmin" : ""}`}>
-                {w.source === "garmin" ? "Garmin" : "Manuellt"}
+              <span className="row" style={{ gap: 6 }}>
+                {view === "both" && (
+                  <span className={`badge ${mine ? "" : "partner"}`}>{names[w.user_id] ?? "?"}</span>
+                )}
+                <span className={`badge ${w.source === "garmin" ? "garmin" : ""}`}>
+                  {w.source === "garmin" ? "Garmin" : "Manuellt"}
+                </span>
               </span>
             </div>
             <div className="muted small">
@@ -65,15 +91,19 @@ export default function History({ onEdit, onChanged, showToast }) {
                   </div>
                 ))}
                 {w.note && <div className="muted small">📝 {w.note}</div>}
-                <div className="spacer" />
-                <div className="row">
-                  <button className="btn btn-secondary btn-small" onClick={() => onEdit(w)}>
-                    ✏️ Redigera
-                  </button>
-                  <button className="btn btn-danger btn-small" onClick={() => remove(w)}>
-                    Ta bort
-                  </button>
-                </div>
+                {mine && (
+                  <>
+                    <div className="spacer" />
+                    <div className="row">
+                      <button className="btn btn-secondary btn-small" onClick={() => onEdit(w)}>
+                        ✏️ Redigera
+                      </button>
+                      <button className="btn btn-danger btn-small" onClick={() => remove(w)}>
+                        Ta bort
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
