@@ -5,13 +5,19 @@ import LogWorkout from "./views/LogWorkout.jsx";
 import History from "./views/History.jsx";
 import Progress from "./views/Progress.jsx";
 import More from "./views/More.jsx";
+import { IconDumbbell, IconCalendar, IconTrend, IconSliders } from "./Icons.jsx";
 
 const TABS = [
-  { id: "logga", label: "Logga", icon: "🏋️" },
-  { id: "historik", label: "Historik", icon: "📅" },
-  { id: "progress", label: "Progress", icon: "📈" },
-  { id: "mer", label: "Mer", icon: "⚙️" }
+  { id: "logga", label: "Logga", Icon: IconDumbbell },
+  { id: "historik", label: "Historik", Icon: IconCalendar },
+  { id: "progress", label: "Progress", Icon: IconTrend },
+  { id: "mer", label: "Mer", Icon: IconSliders }
 ];
+
+function todayLabel() {
+  const s = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = laddar
@@ -67,7 +73,7 @@ export default function App() {
   if (!configOk) {
     return (
       <div className="auth-wrap">
-        <div className="auth-logo">🏋️</div>
+        <div className="auth-logo"><IconDumbbell /></div>
         <h1 className="auth-title">Träningslogg</h1>
         <div className="info-box">
           Appen är inte konfigurerad ännu. Kopiera <code>client/.env.example</code> till{" "}
@@ -87,6 +93,14 @@ export default function App() {
 
   return (
     <>
+      <header className="topbar">
+        <span className="brand">
+          <IconDumbbell className="brand-icon" />
+          TRÄNINGS<span className="brand-accent">LOGG</span>
+        </span>
+        <span className="topbar-date">{todayLabel()}</span>
+      </header>
+
       <main className="app-main">
         {tab === "logga" && (
           <LogWorkout
@@ -120,7 +134,7 @@ export default function App() {
       <nav className="tabbar">
         {TABS.map((t) => (
           <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
-            <span className="tab-icon">{t.icon}</span>
+            <t.Icon className="tab-svg" />
             {t.label}
             {t.id === "mer" && (pendingCount > 0 || garminExpired) && <span className="badge-dot" />}
           </button>

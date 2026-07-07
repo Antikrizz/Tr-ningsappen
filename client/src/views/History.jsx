@@ -83,10 +83,15 @@ export default function History({ session, onEdit, onChanged, showToast }) {
               <div onClick={(e) => e.stopPropagation()}>
                 <div className="divider" />
                 {groups.map((g) => (
-                  <div key={g.exerciseId} style={{ marginBottom: 10 }}>
+                  <div key={g.exerciseId} style={{ marginBottom: 12 }}>
                     <strong className="small">{g.name}</strong>
-                    <div className="muted small">
-                      {g.sets.map((s) => `${Number(s.weight)}kg × ${s.reps}`).join("   ")}
+                    <div className="chips">
+                      {g.sets.map((s, i) => (
+                        <span className="chip" key={i}>
+                          {Number(s.weight)}<span className="chip-unit">kg</span>
+                          <span className="chip-x">×</span>{s.reps}
+                        </span>
+                      ))}
                     </div>
                   </div>
                 ))}

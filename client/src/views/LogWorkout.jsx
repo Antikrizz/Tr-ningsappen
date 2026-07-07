@@ -20,6 +20,7 @@ export default function LogWorkout({ session, editWorkout, onDone, onCancelEdit 
     supabase
       .from("exercises")
       .select("id,name")
+      .or(`owner_id.is.null,owner_id.eq.${uid}`)
       .order("name")
       .then(({ data }) => setExercises(data ?? []));
     supabase

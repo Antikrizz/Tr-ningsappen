@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend,
+  ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis, Tooltip, Legend,
   BarChart, Bar, CartesianGrid
 } from "recharts";
 import { supabase } from "../supabase.js";
@@ -16,6 +16,7 @@ export default function Progress({ session }) {
     supabase
       .from("exercises")
       .select("id,name")
+      .or(`owner_id.is.null,owner_id.eq.${uid}`)
       .order("name")
       .then(({ data }) => {
         setExercises(data ?? []);
@@ -81,35 +82,50 @@ export default function Progress({ session }) {
           <h2>Vikt över tid</h2>
           <div className="chart-box">
             <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={data.chart} margin={{ top: 5, right: 8, left: -18, bottom: 0 }}>
-                <CartesianGrid stroke="#2e3340" strokeDasharray="3 3" />
-                <XAxis dataKey="date" tickFormatter={formatDate} stroke="#9aa1b0" fontSize={11} />
-                <YAxis stroke="#9aa1b0" fontSize={11} domain={["auto", "auto"]} />
+              <ComposedChart data={data.chart} margin={{ top: 8, right: 10, left: -14, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradWeight" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#ff8534" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#ff8534" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#232a33" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={formatDate} stroke="#94a0ac" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="#94a0ac" fontSize={11} domain={["auto", "auto"]} tickLine={false} axisLine={false} />
                 <Tooltip
-                  contentStyle={{ background: "#232733", border: "1px solid #2e3340", borderRadius: 10 }}
+                  contentStyle={{ background: "#1e232a", border: "1px solid #2a313b", borderRadius: 12 }}
                   labelFormatter={formatDate}
                   formatter={(v, name) => [`${v} kg`, name]}
                 />
-                <Legend />
-                <Line type="monotone" dataKey="bestWeight" name="Tyngsta set" stroke="#4f8ef7" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="e1rm" name="Uppskattat 1RM" stroke="#3ecf8e" strokeWidth={2} dot={false} strokeDasharray="5 3" />
-              </LineChart>
+                <Legend iconType="plainline" />
+                <Area
+                  type="monotone" dataKey="bestWeight" name="Tyngsta set"
+                  stroke="#ff8534" strokeWidth={2.5} fill="url(#gradWeight)"
+                  dot={{ r: 3.5, fill: "#ff8534", strokeWidth: 0 }}
+                  activeDot={{ r: 5 }}
+                />
+                <Line
+                  type="monotone" dataKey="e1rm" name="Uppskattat 1RM"
+                  stroke="#5fd4f5" strokeWidth={2} dot={false} strokeDasharray="6 4"
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
 
           <h2>Volym per pass</h2>
           <div className="chart-box">
             <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={data.chart} margin={{ top: 5, right: 8, left: -18, bottom: 0 }}>
-                <CartesianGrid stroke="#2e3340" strokeDasharray="3 3" />
-                <XAxis dataKey="date" tickFormatter={formatDate} stroke="#9aa1b0" fontSize={11} />
-                <YAxis stroke="#9aa1b0" fontSize={11} />
+              <BarChart data={data.chart} margin={{ top: 8, right: 10, left: -14, bottom: 0 }}>
+                <CartesianGrid stroke="#232a33" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={formatDate} stroke="#94a0ac" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="#94a0ac" fontSize={11} tickLine={false} axisLine={false} />
                 <Tooltip
-                  contentStyle={{ background: "#232733", border: "1px solid #2e3340", borderRadius: 10 }}
+                  contentStyle={{ background: "#1e232a", border: "1px solid #2a313b", borderRadius: 12 }}
                   labelFormatter={formatDate}
                   formatter={(v) => [`${v} kg`, "Volym"]}
+                  cursor={{ fill: "rgba(255,133,52,0.08)" }}
                 />
-                <Bar dataKey="volume" name="Volym" fill="#4f8ef7" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="volume" name="Volym" fill="#ff8534" radius={[5, 5, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

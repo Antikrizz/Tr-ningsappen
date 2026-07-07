@@ -20,7 +20,7 @@ export default function More({ session, runSync, garminExpired, showToast, onImp
     const [{ data: prof }, { data: ex }, { data: pend }, { data: maps }, { data: goalRows }] =
       await Promise.all([
         supabase.from("profiles").select("name,garmin_linked").eq("id", uid).maybeSingle(),
-        supabase.from("exercises").select("id,name,owner_id").order("name"),
+        supabase.from("exercises").select("id,name,owner_id").or(`owner_id.is.null,owner_id.eq.${uid}`).order("name"),
         supabase.from("garmin_pending").select("activity_id,date,unmapped"),
         supabase.from("garmin_mappings").select("garmin_key,exercise_id,exercises(name)").order("garmin_key"),
         supabase.from("exercise_goals").select("exercise_id,target_reps,increment")

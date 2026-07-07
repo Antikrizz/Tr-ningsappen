@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../supabase.js";
+import { IconDumbbell } from "../Icons.jsx";
 
 export default function Auth() {
   const [mode, setMode] = useState("login");
@@ -42,7 +43,7 @@ export default function Auth() {
 
   return (
     <div className="auth-wrap">
-      <div className="auth-logo">🏋️</div>
+      <div className="auth-logo"><IconDumbbell /></div>
       <h1 className="auth-title">Träningslogg</h1>
 
       <form onSubmit={submit}>
